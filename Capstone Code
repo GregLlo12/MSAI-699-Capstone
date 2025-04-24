@@ -1,0 +1,88 @@
+# model_testing_debugging.py
+
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import StratifiedKFold
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix, classification_report
+import warnings
+warnings.filterwarnings("ignore")
+
+# Load and clean dataset
+df = pd.read_csv('/Users/gregoryllorancejr./Desktop/USvideos3.csv', encoding='latin1')
+df.columns = df.columns.str.strip()
+df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
+df.dropna(inplace=True)
+
+# Create binary target: popular = top 25% of views
+threshold = df['views'].quantile(0.75)
+df['popular'] = (df['views'] >= threshold).astype(int)
+
+# Feature engineering
+df['engagement_ratio'] = (df['likes'] + df['comment_total']) / (df['views'] + 1)
+df['like_dislike_ratio'] = (df['likes'] + 1) / (df['dislikes'] + 1)
+
+features = ['likes', 'dislikes', 'comment_total', 'category_id', 'engagement_ratio', 'like_dislike_ratio']
+X = df[features]
+y = df['popular']
+
+# Scale numeric features
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+
+# 5-Fold Cross-Validation
+kf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+accuracy_list, precision_list, recall_list, f1_list = [], [], [], []
+all_y_true = []
+all_y_pred = []
+
+fold = 1
+for train_idx, test_idx in kf.split(X_scaled, y):
+    X_train, X_test = X_scaled[train_idx], X_scaled[test_idx]
+    y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
+
+    model = LogisticRegression(max_iter=1000)
+    model.fit(X_train, y_train)
+    y_pred = model.predict(X_test)
+
+    # Collect metrics
+    acc = accuracy_score(y_test, y_pred)
+    prec = precision_score(y_test, y_pred)
+    rec = recall_score(y_test, y_pred)
+    f1 = f1_score(y_test, y_pred)
+
+    accuracy_list.append(acc)
+    precision_list.append(prec)
+    recall_list.append(rec)
+    f1_list.append(f1)
+
+    all_y_true.extend(y_test)
+    all_y_pred.extend(y_pred)
+
+    print(f"\n--- Fold {fold} ---")
+    print(f"Accuracy: {acc:.4f}")
+    print(f"Precision: {prec:.4f}")
+    print(f"Recall: {rec:.4f}")
+    print(f"F1 Score: {f1:.4f}")
+    fold += 1
+
+# Overall Performance
+print("\n=== Cross-Validation Summary ===")
+print(f"Mean Accuracy: {np.mean(accuracy_list):.4f}")
+print(f"Mean Precision: {np.mean(precision_list):.4f}")
+print(f"Mean Recall: {np.mean(recall_list):.4f}")
+print(f"Mean F1 Score: {np.mean(f1_list):.4f}")
+
+# Confusion Matrix & Classification Report
+print("\n=== Confusion Matrix (All Folds Combined) ===")
+print(confusion_matrix(all_y_true, all_y_pred))
+
+print("\n=== Classification Report ===")
+print(classification_report(all_y_true, all_y_pred))
+
+# Basic Error Analysis
+errors = df.iloc[np.where(np.array(all_y_true) != np.array(all_y_pred))[0]]
+print(f"\nTotal Misclassified Samples: {len(errors)}")
+print("Top 5 misclassified sample rows:")
+print(errors.head(5))
